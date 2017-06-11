@@ -1,0 +1,837 @@
+---
+title: ' Predictive Modeling for Binary Classification '
+author: 'Tyler Smith: Assignment 2'
+date: "May 2, 2017"
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+---
+
+```{r, echo=FALSE}
+#pulling wine data set
+library(knitr)
+library(xtable)
+spam_data <- read.csv("C:/Users/Tyler/Desktop/MSPA/MSPA 454/spambase.data", header = FALSE, sep = ",")
+spam_names <- read.csv("C:/Users/Tyler/Desktop/MSPA/MSPA 454/spambasenames.csv", header = FALSE, sep = ",")
+spam_names <- as.character(spam_names$V1)
+colnames(spam_data) <- spam_names
+names(spam_data)[names(spam_data)=="char_freq_;"] <- "char_freq_semcol"
+names(spam_data)[names(spam_data)=="char_freq_("] <- "char_freq_paren"
+names(spam_data)[names(spam_data)=="char_freq_["] <- "char_freq_brack"
+names(spam_data)[names(spam_data)=="char_freq_!"] <- "char_freq_exla"
+names(spam_data)[names(spam_data)=="char_freq_$"] <- "char_freq_dolla"
+names(spam_data)[names(spam_data)=="char_freq_#"] <- "char_freq_pound"
+spam_data$spam_y_n <- as.factor(spam_data$spam_y_n)
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning=FALSE)
+```
+
+# Data Quality Check
+
+The spam email data set variables are mostly numeric, with the exception of the response variable; which is categorical. The data is also interesting because it measures how many words or characters are contained in an email, and does not focus on where those words or characters are located in an email. Exploring where these words and characters are in an email could also be important in determining whether an email is spam, although this is not part of this exercise. 
+
+```{r results='asis', echo=FALSE}
+  spam_datadf <- as.data.frame(sapply(spam_data, class))
+  colnames(spam_datadf) <- c("Data Type")
+  spam_datadf$Description <- c("All variables describe frequency of word or character in the description.")
+  spam_datadf_xtab <- xtable(spam_datadf, caption = "Spam Email Charateristics", align=c("@{}l","r", "l@{}"), digits=2)
+  print(spam_datadf_xtab, scalebox = 0.6, comment = FALSE, justify = left)
+```
+
+\pagebreak
+
+The spam email data set does not indicate any missing variables. There are also no additional variables that have been added to the data set.
+
+```{r results='asis', echo=FALSE}
+  nadf <- as.data.frame(sapply(spam_data, function(x) sum(is.na(x))))
+  colnames(nadf) <- c("Missing Variables")
+  na_xtab <- xtable(nadf, align=c("@{}l","c"), digits=2, caption = "Spam Email Missing Variables")
+  print(na_xtab, scalebox = 0.6, comment = FALSE)
+```
+
+\pagebreak
+
+The spam email data demonstrates a high degree of dimentionality, so looking at all variables in depth would be very time consuming and difficult. Exploring the spam email data using an initial logistic regression helps narrow down which variables should be explored further due to their importance. Variables with low p-values and higher coefficient values show which variables are likely more important in determining the spam status of an email.
+
+```{r results='asis', echo=FALSE, message=FALSE, warning=FALSE, fig.cap = "\\label{}Spam Email Logistic Model Variable Exploration"}
+explo.log <- glm(spam_y_n ~ ., spam_data, family = binomial("logit"))
+exlogdf <- round(as.data.frame(explo.log$coefficients),4)
+exlogdf$pvalues <- round(summary(explo.log)$coefficients[,4],4) 
+names(exlogdf)[names(exlogdf)=="explo.log$coefficients"] <- "Coefficients"
+names(exlogdf)[names(exlogdf)=="pvalues"] <- "P-values"
+logex_xtab <- xtable(exlogdf, align=c("@{}l","c","c"), digits=3, caption = "Spam Email Logistic Model Variable Exploration")
+print(logex_xtab, scalebox = 0.6, comment = FALSE)
+```
+
+\pagebreak
+
+Based off the results from the logistics regression it is possible to focus on the statistics of a few variables which are likely going to be important in the modeling process. Doing this reduces clutter in the report, but at the same time gives insight into the nature of the data.  
+
+```{r results='asis', echo=FALSE}
+  spam_data_logmod <- data.frame(spam_data$word_freq_our,spam_data$word_freq_remove,spam_data$word_freq_free,
+                                  spam_data$word_freq_business,spam_data$word_freq_your,spam_data$word_freq_000,
+                                  spam_data$word_freq_hp,spam_data$word_freq_george,spam_data$word_freq_edu,spam_data$char_freq_exla,
+                                  spam_data$char_freq_dolla,spam_data$capital_run_length_total)
+  colnames(spam_data_logmod) <- c("word_freq_our","word_freq_remove","word_freq_free",
+                                  "word_freq_business","word_freq_your","word_freq_000",
+                                  "word_freq_hp","word_freq_george","word_freq_edu","char_freq_exla",
+                                  "char_freq_dolla","capital_run_length_total") 
+  summ_xtab1 <- xtable(summary(spam_data_logmod)[,1:6])
+  print(summ_xtab1, scalebox = 0.6, comment = FALSE)
+  summ_xtab2 <- xtable(summary(spam_data_logmod)[,7:12], caption = "Important Spam Email Variable Statistics")
+  print(summ_xtab2, scalebox = 0.6, comment = FALSE)
+```
+
+The continuous variables demonstrates a high concentration of observations with a value of zero. One particular observation the is interesting is the fact the word_freq_george seems to have very few observations that are not zero, but the logistic regression model decided that the variable is important. The same seems true for word_freq_edu. 
+
+```{r results='asis', echo=FALSE, fig.cap = "\\label{}Spam Email Variable Distributions"}
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+  library(grid)
+
+  # Make a list from the ... arguments and plotlist
+  plots <- c(list(...), plotlist)
+
+  numPlots = length(plots)
+
+  # If layout is NULL, then use 'cols' to determine layout
+  if (is.null(layout)) {
+    # Make the panel
+    # ncol: Number of columns of plots
+    # nrow: Number of rows needed, calculated from # of cols
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                    ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+
+ if (numPlots==1) {
+    print(plots[[1]])
+
+  } else {
+    # Set up the page
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+
+    # Make each plot, in the correct location
+    for (i in 1:numPlots) {
+      # Get the i,j matrix positions of the regions that contain this subplot
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+
+library(ggplot2)
+
+spam1 <- ggplot(spam_data, aes(x=word_freq_our)) + 
+    geom_histogram(binwidth=.1, colour="black", fill="white") +
+    labs(x = "Frequency of 'our'")+
+    theme_minimal()+
+    theme(legend.position = "bottom",
+          axis.text.x = element_text(angle = 45),
+          text = element_text(size = 11))
+
+spam2 <- ggplot(spam_data, aes(x=word_freq_remove)) + 
+    geom_histogram(binwidth=.1, colour="black", fill="white") +
+    labs(x = "Frequency of 'remove'")+
+    theme_minimal()+
+    theme(legend.position = "bottom",
+          axis.text.x = element_text(angle = 45),
+          text = element_text(size = 11))
+
+spam3 <- ggplot(spam_data, aes(x=word_freq_free)) + 
+    geom_histogram(binwidth=.1, colour="black", fill="white") +
+    labs(x = "Frequency of 'free'")+
+    theme_minimal()+
+    theme(legend.position = "bottom",
+          axis.text.x = element_text(angle = 45),
+          text = element_text(size = 11))
+
+spam4 <- ggplot(spam_data, aes(x=word_freq_business)) + 
+    geom_histogram(binwidth=.1, colour="black", fill="white") +
+    labs(x = "Frequency of 'business'")+
+    theme_minimal()+
+    theme(legend.position = "bottom",
+          axis.text.x = element_text(angle = 45),
+          text = element_text(size = 11))
+
+spam5 <- ggplot(spam_data, aes(x=word_freq_your)) + 
+    geom_histogram(binwidth=.1, colour="black", fill="white") +
+    labs(x = "Frequency of 'your'")+
+    theme_minimal()+
+    theme(legend.position = "bottom",
+          axis.text.x = element_text(angle = 45),
+          text = element_text(size = 11))
+
+spam6 <- ggplot(spam_data, aes(x=word_freq_000)) + 
+    geom_histogram(binwidth=.1, colour="black", fill="white") +
+    labs(x = "Frequency of '000'")+
+    theme_minimal()+
+    theme(legend.position = "bottom",
+          axis.text.x = element_text(angle = 45),
+          text = element_text(size = 11))
+
+spam7 <- ggplot(spam_data, aes(x=word_freq_hp)) + 
+    geom_histogram(binwidth=.1, colour="black", fill="white") +
+    labs(x = "Frequency of 'hp'")+
+    theme_minimal()+
+    theme(legend.position = "bottom",
+          axis.text.x = element_text(angle = 45),
+          text = element_text(size = 11))
+
+spam8 <- ggplot(spam_data, aes(x=word_freq_george)) + 
+    geom_histogram(binwidth=.1, colour="black", fill="white") +
+    labs(x = "Frequency of 'george'")+
+    theme_minimal()+
+    theme(legend.position = "bottom",
+          axis.text.x = element_text(angle = 45),
+          text = element_text(size = 11))
+
+spam9 <- ggplot(spam_data, aes(x=word_freq_edu)) + 
+    geom_histogram(binwidth=.1, colour="black", fill="white") +
+    labs(x = "Frequency of 'edu'")+
+    theme_minimal()+
+    theme(legend.position = "bottom",
+          axis.text.x = element_text(angle = 45),
+          text = element_text(size = 11))
+
+spam10 <- ggplot(spam_data, aes(x=char_freq_exla)) + 
+    geom_histogram(binwidth=.1, colour="black", fill="white") +
+    labs(x = "Frequency of '!'")+
+    theme_minimal()+
+    theme(legend.position = "bottom",
+          axis.text.x = element_text(angle = 45),
+          text = element_text(size = 11))
+
+spam11 <- ggplot(spam_data, aes(x=char_freq_dolla)) + 
+    geom_histogram(binwidth=.1, colour="black", fill="white") +
+    labs(x = "Frequency of '$'")+
+    theme_minimal()+
+    theme(legend.position = "bottom",
+          axis.text.x = element_text(angle = 45),
+          text = element_text(size = 11))
+
+spam12 <- ggplot(spam_data, aes(x=capital_run_length_total)) + 
+    geom_histogram(binwidth=.1, colour="black", fill="white") +
+    labs(x = "Capital Length Total")+
+    theme_minimal()+
+    theme(legend.position = "bottom",
+          axis.text.x = element_text(angle = 45),
+          text = element_text(size = 11))
+
+
+multiplot(spam1, spam2, spam3, spam4, cols=2)
+```
+
+```{r results='asis', echo=FALSE, fig.cap = "\\label{}Spam Email Variable Distributions"}
+multiplot(spam5, spam6, spam7, spam8, cols=2)
+multiplot(spam9, spam10, spam11, spam12, cols=2)
+```
+
+Overall, the data is skewed towards lower values. This is due to the high concentration of observations with a value of zero. There are variables determined important by an exploratory logistic model that may not be that important. Example like word_freq_edu and word_freq_george seem to demonstrate this. With this observation, it may be possible to remove those variables from final models.  
+
+\pagebreak
+
+# Exploratory Data Analysis
+
+Delving further into the spam email data it is possible to see how the continuous variables from the exploratory logistic model impact whether or not an email is spam. The method used to explore this is through box plots. The box plots confirm many of the variables suggested as important by the exploratory logistic regression model are important. 
+
+```{r results='asis', echo=FALSE, fig.cap = "\\label{}Important Spam Email Variables"}
+box1 <- ggplot(spam_data, aes(x = spam_y_n, y = word_freq_our)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+box2 <- ggplot(spam_data, aes(x = spam_y_n, y = word_freq_remove)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+box3 <- ggplot(spam_data, aes(x = spam_y_n, y = word_freq_free)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+box4 <- ggplot(spam_data, aes(x = spam_y_n, y = word_freq_business)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+box5 <- ggplot(spam_data, aes(x = spam_y_n, y = word_freq_your)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+box6 <- ggplot(spam_data, aes(x = spam_y_n, y = word_freq_000)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+box7 <- ggplot(spam_data, aes(x = spam_y_n, y = word_freq_hp)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+box8 <- ggplot(spam_data, aes(x = spam_y_n, y = word_freq_george)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+box9 <- ggplot(spam_data, aes(x = spam_y_n, y = word_freq_edu)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+box10 <- ggplot(spam_data, aes(x = spam_y_n, y = char_freq_exla)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+box11 <- ggplot(spam_data, aes(x = spam_y_n, y = char_freq_dolla)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+box12 <- ggplot(spam_data, aes(x = spam_y_n, y = capital_run_length_total)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+multiplot(box1, box2, box3, box4, cols=2)
+```
+
+```{r results='asis', echo=FALSE, fig.cap = "\\label{}Important Spam Email Variables"}
+multiplot(box5, box6, box7, box8, cols=2)
+multiplot(box9, box10, box11, box12, cols=2)
+```
+
+\pagebreak
+
+# Exploratory Tree
+
+An exploratory decision tree reveals six variables are important in predicting whether an email is spam. The first split decision of whether or not an email contains more $ characters is not surprising, and can be confirmed from the EDA conducted previously. In fact around 24% of spam emails have the $ character repeating more frequently.
+
+```{r results='asis', echo=FALSE, fig.cap = "\\label{}Spam Email RPART Decision Tree"}
+library(rpart)
+library(rpart.plot)
+set.seed(25)
+spam.tree <- rpart(spam_y_n ~ ., spam_data) 
+rpart.plot(spam.tree, digits = 3)
+```
+
+Interestingly, many of the variables determined to be important by the exploratory logistic model are suggested by the decision tree as well.
+
+\pagebreak
+
+# The Model Build
+## Logistic Regression Model: Variable Selection
+
+As seen previously, the exploratory logistic regression model was helpful in determining important variables. Using logistic regression models with selection methods should improve model accuracy beyond the 12 variables used in the exploratory logistic model, but reduce dimentionality.
+
+```{r results='asis', include=FALSE}
+set.seed(25)
+ratio_sep <- 0.7
+index <- sample(1:nrow(spam_data),round(ratio_sep*nrow(spam_data)))
+train.spam <- spam_data[index,]
+test.spam <- spam_data[-index,]
+model.log <- glm(spam_y_n ~ ., train.spam, family = binomial("logit"))
+post.valid.log <- predict(model.log, train.spam, type = "response") 
+cutoff.log <- 0.5 # set cutoff based on n.mail.valid
+chat.valid.log <- ifelse(post.valid.log > cutoff.log, 1, 0) # mail to everyone above the cutoff
+```
+
+A model using backward variable selection with a cutoff value of 50% appears to show that around 30 variables is optimal for getting the best r square, BIC, and Mallow CP.  
+
+```{r results='asis', echo=FALSE, message=FALSE, warning=FALSE, fig.cap = "\\label{}Backward Regression Selection"}
+library(leaps)
+set.seed(25)
+logfit.bwd.spam = regsubsets(spam_y_n ~ ., train.spam, nvmax=57, method = "backward")  
+bkd.spam.lmsum <- summary(logfit.bwd.spam)
+par(mfrow=c(1,3))
+plot(bkd.spam.lmsum$adjr2 ,xlab = "Number of Variables", ylab = "Adjusted RSq")
+plot(bkd.spam.lmsum$bic ,xlab = "Number of Variables", ylab = "BIC")
+plot(bkd.spam.lmsum$cp ,xlab = "Number of Variables", ylab = "CP")
+bkd_lmspam <- as.data.frame(coef(logfit.bwd.spam , 30))
+```
+
+\pagebreak
+
+The leaps forward selection model also indicates around 30 variables to optimize the adjusted r square, BIC, and Mallow CP. 
+
+```{r results='asis', echo=FALSE, message=FALSE, warning=FALSE, fig.cap = "\\label{}Forward Regression Selection"}
+set.seed(25)
+logfit.fwd.spam = regsubsets(spam_y_n ~ ., train.spam, nvmax=57, method = "forward")  
+fwd.spam.lmsum <- summary(logfit.fwd.spam)
+par(mfrow=c(1,3))
+plot(fwd.spam.lmsum$adjr2 ,xlab = "Number of Variables", ylab = "Adjusted RSq")
+plot(fwd.spam.lmsum$bic ,xlab = "Number of Variables", ylab = "BIC")
+plot(fwd.spam.lmsum$cp ,xlab = "Number of Variables", ylab = "CP")
+fwd_lmspam <- as.data.frame(coef(logfit.fwd.spam , 30))
+```
+
+\pagebreak
+
+The leaps stepwise selection model also indicates around 30 variables to optimize the adjusted r square, BIC, and Mallow CP. The graph does demonstrate some erratic patterns, but overall the graph is quite similar to the backward and forward selection methods.
+
+```{r results='asis', echo=FALSE, message=FALSE, warning=FALSE, fig.cap = "\\label{}Stepwise Regression Selection"}
+set.seed(25)
+logfit.step.spam = regsubsets(spam_y_n ~ ., train.spam, nvmax=57, method = "seqrep")  
+step.spam.lmsum <- summary(logfit.step.spam)
+par(mfrow=c(1,3))
+plot(step.spam.lmsum$adjr2 ,xlab = "Number of Variables", ylab = "Adjusted RSq")
+plot(step.spam.lmsum$bic ,xlab = "Number of Variables", ylab = "BIC")
+plot(step.spam.lmsum$cp ,xlab = "Number of Variables", ylab = "CP")
+steps_lmspam <- as.data.frame(coef(logfit.step.spam  , 30))
+```
+
+The leaps all subset selection method did not work, so only backward, forward, and stepwise methods are considered. It appears that too much memory is needed to run the all subset method.
+
+\pagebreak
+
+All of the selection methods indicate that the values for all selection methods are the same. While this is somewhat surprising, this is not unprecedented, but this may also be an error. Of all the variables word_freq_remove and char_freq_dolla seem to indicate a spam email, while char_freq_semcol seems to indicate that an email is likely not spam.
+
+```{r results='asis', echo=FALSE}
+leaps_dfs <- cbind(bkd_lmspam,fwd_lmspam,steps_lmspam)
+colnames(leaps_dfs) <- c("Backward Variable Selection","Forward Variable Selection","Stepwise Variable Selection") 
+leapsxtab <- xtable(leaps_dfs, caption = "Leap Variable Selection Methods")
+print(leapsxtab, scalebox = 0.6, comment = FALSE)
+```
+
+Using the most important variables obtained from the logistic regression selection methods a new logistic regression model can be made. By using the 30 variables suggested, the best adjusted r square, BIC, and Mallow CP can be obtained. These statistics indicate which variables are likely going to lead to the best results. The following table shows how often the logistic regression model correctly classifies the email.
+
+```{r results='asis', echo=FALSE}
+final.model.log <- glm(spam_y_n ~ word_freq_your + word_freq_you + word_freq_will + word_freq_remove + word_freq_re + 
+                         word_freq_project + word_freq_over + word_freq_our + word_freq_order + word_freq_money + word_freq_meeting +
+                         word_freq_internet + word_freq_hpl + word_freq_hp + word_freq_george + word_freq_free + word_freq_font +
+                         word_freq_email + word_freq_edu + word_freq_data + word_freq_credit + word_freq_business + word_freq_all +
+                         word_freq_3d + word_freq_1999 + word_freq_000 + char_freq_semcol + char_freq_exla + char_freq_dolla +
+                         capital_run_length_total, train.spam, family = binomial("logit"))
+pred.log.train <- predict(final.model.log, train.spam[,-58], type = "response")
+post.train.log <- ifelse(pred.log.train > cutoff.log, 1, 0) # mail to everyone above the cutoff
+logtable <- table(post.train.log, train.spam$spam_y_n)
+xtralog <- xtable(logtable, comment = FALSE, caption = "Best Logistic Regression Classification Error Results: Training Data")
+print(xtralog, scalebox = 0.6, comment = FALSE, justify = left)
+```
+
+\pagebreak
+
+## Tree Model
+
+It is possible to make predictions based off the decision tree explored in the exploratory data analysis section. Using this decision tree the following table shows how often the decision tree model correctly classifies spam.
+
+```{r results='asis', echo=FALSE}
+set.seed(25)
+post.train.tree <- predict(spam.tree, train.spam, type = "class") #tree predictions, uses the EDA tree from above
+treetable <- table(post.train.tree, train.spam$spam_y_n)
+xtratree <- xtable(treetable, comment = FALSE, caption = "Decision Tree Classification Error Results: Training Data")
+print(xtratree, scalebox = 0.6, comment = FALSE, justify = left)
+```
+
+## Support Vector Machine
+
+A support vector machine model can be used as another type of classification model. It is possible to tune a support vector machine model in order to get the best support vector machine. This is done by finding which gamma and cost parameter lead to the best classification models. The following table shows how well a tuned support vector machine performs.
+
+```{r results='asis', echo=FALSE, fig.cap = "\\label{}Support Vector Machine"}
+library(e1071)
+set.seed(25)
+tune.out = tune(svm, spam_y_n~., data = train.spam, kernel ="radial", ranges=list(cost=c(0.1,1,10,100,1000), gamma=c(0.5,1,2,3,4)))
+svmfit.opt = svm(spam_y_n~., data = train.spam, kernel = "radial", gamma = 0.5, cost = 10 , decision.values = T)  
+svm.pred = predict(svmfit.opt , train.spam)
+svmtable <- table(svm.pred,train.spam$spam_y_n)
+xtrasvm <- xtable(svmtable, caption = "SVM Classification Error Results: Training Data")
+print(xtrasvm, scalebox = 0.6, comment = FALSE, justify = left)
+```
+
+\pagebreak
+
+## Random Forest
+
+The last model explored is a random forest. The following tables show how well a random forest model performs, and which variables are determined to be most important important. It is interesting to note that many of the same variables deemed important in the initial exploratory analysis are also seen as important in the random forest, as indicated by higher Gini values.
+
+```{r results='asis', echo=FALSE, fig.cap = "\\label{}Spam Random Forest"}
+# random forest classification model
+library(randomForest)
+set.seed(25)
+rf.model = randomForest(spam_y_n ~ ., data =  train.spam, mtry = 30)
+post.valid.rf = predict(rf.model, newdata = train.spam)
+rf_spamxtab2 <- xtable(rf.model$importance, caption = "Important Random Forest Variables")
+print(rf_spamxtab2, scalebox = 0.6, comment = FALSE)
+```
+
+The following table shows how well the random forest model preforms on the test data.
+
+```{r results='asis', echo=FALSE, fig.cap = "\\label{}Spam Random Forest"}
+# random forest classification model
+rftable <- table(post.valid.rf, train.spam$spam_y_n)
+xtrarf <- xtable(rftable, caption = "Random Forest Classification Error Results: Training Data")
+print(xtrarf, scalebox = 0.6, comment = FALSE)
+```
+
+The random forest method also indicated using approximately 50 trees to optimize the reduction in error.
+
+```{r results='asis', echo=FALSE, fig.cap = "\\label{}Spam Email Random Forest Model"}
+plot(rf.model)
+```
+
+\pagebreak
+
+# Model Comparison
+
+After using the test data it is possible to get the classification error results. The tables for classification errors for each of the models are as follows. 
+
+```{r results='asis', echo=FALSE}
+#code to predict the MAE for in sample and out of sample predictions
+set.seed(25)
+pred_log <- predict(final.model.log, test.spam[,-58], type = "response")
+valid.pred.log <- ifelse(pred_log > cutoff.log, 1, 0) # mail to everyone above the cutoff
+logtesttable <- table(valid.pred.log, test.spam$spam_y_n) # classification table
+xtestlog <- xtable(logtesttable, caption = "Best Logistic Regression Classification Error Results: Test Data")
+print(xtestlog, scalebox = 0.6, comment = FALSE, justify = left)
+logcorclasstest <- (779+485)/1380
+logincorclasstest <- (38+78)/1380
+logcorclasstrain <- (1891+1116)/3221
+logincorclasstrain <- (80+134)/3221
+
+valid.pred.tree <- predict(spam.tree, test.spam[,-58], type = "class") #tree predictions, uses the EDA tree from above
+treetesttable <- table(valid.pred.tree, test.spam$spam_y_n)
+xtesttree <- xtable(treetesttable, caption = "Decision Tree Classification Error Results: Test Data")
+print(xtesttree, scalebox = 0.6, comment = FALSE, justify = left)
+treecorclasstest <- (788+450)/1380
+treeincorclasstest <- (36+113)/1380
+treecorclasstrain <- (1873+1049)/3221
+treeincorclasstrain <- (98+201)/3221
+
+valid.pred.svm <- predict(svmfit.opt, test.spam[,-58])
+svmtesttable <- table(valid.pred.svm,test.spam$spam_y_n)
+svmcorclasstest <- (808+264)/1380
+svmincorclasstest <- (9+299)/1380
+svmcorclasstrain <- (1971+1239)/3221
+svmincorclasstrain <- (0+11)/3221
+
+valid.pred.rf <- predict(rf.model, test.spam[,-58])
+rftesttable <- table(valid.pred.rf, test.spam$spam_y_n)
+rfcorclasstest <- (787+502)/1380
+rfincorclasstest <- (30+60)/1380
+rfcorclasstrain <- (1971+1248)/3221
+rfincorclasstrain <- (0+2)/3221
+```
+
+```{r results='asis', echo=FALSE, fig.cap = "\\label{}Spam Email Variable Distributions"}
+xtestsvm <- xtable(svmtesttable, caption = "SVM Classification Error Results: Test Data")
+print(xtestsvm, scalebox = 0.6, comment = FALSE, justify = left)
+
+xtestrf <- xtable(rftesttable, caption = "Random Forest Classification Error Results: Test Data")
+print(xtestrf, scalebox = 0.6, comment = FALSE, justify = left)
+```
+
+\pagebreak
+
+Using classification error rates of the training and test data set it is possible to determine the best preforming models. The results show that the random forest model preforms the best with a classification error rate of around 6.5%. In all cases the models returned good results using the training data set. It is somewhat interesting that the second best model was the logistic regression model with only variables that optimize adjusted r square, BIC, and Mallow CP included. Combining the information learned from the logistic regression model and the random forest model it is possible to understand what variables may explain a spam email. Another result that may need to be explained further is how the tuned SVM preformed so poorly compared to the SVM on the training data. 
+
+```{r results='asis', echo=FALSE}
+#code to predict the MAE for in sample and out of sample predictions
+correctclasstest <- c(logcorclasstest,treecorclasstest,svmcorclasstest,rfcorclasstest)
+incorrectclasstest <- c(logincorclasstest,treeincorclasstest,svmincorclasstest,rfincorclasstest)
+correctclasstrain <- c(logcorclasstrain,treecorclasstrain,svmcorclasstrain,rfcorclasstrain)
+incorrectclasstrain <- c(logincorclasstrain,treeincorclasstrain,svmincorclasstrain,rfincorclasstrain)
+finalclasstable <- data.frame(round(correctclasstest,digits = 3),round(correctclasstrain,digits = 3),
+                              round(incorrectclasstest,digits = 3),round(incorrectclasstrain,digits = 3))
+colnames(finalclasstable) <- c("Correct Classifcation Rate: Test Data Set","Correct Classifcation Rate: Training Data Set",
+                               "Incorrect Classifcation Rate: Test Data Set","Incorrect Classifcation Rate: Training Data Set")
+rownames(finalclasstable) <- c("Variable Selection Logistic Model","Decision Tree Model","SVM Model","Random Forest Model")
+finalclassx1 <- xtable(finalclasstable[,1:2])
+print(finalclassx1, scalebox = 0.6, comment = FALSE)
+finalclassx2 <- xtable(finalclasstable[,3:4], caption = "All Model Classification Error Rates")
+print(finalclassx2, scalebox = 0.6, comment = FALSE)
+```
+
+\pagebreak
+
+## Appendix
+
+#### Code for figure 1
+```{r results='asis', echo=TRUE, eval = FALSE, fig.cap = "\\label{}Important Spam Variable Distributions"}
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+  library(grid)
+
+  # Make a list from the ... arguments and plotlist
+  plots <- c(list(...), plotlist)
+
+  numPlots = length(plots)
+
+  # If layout is NULL, then use 'cols' to determine layout
+  if (is.null(layout)) {
+    # Make the panel
+    # ncol: Number of columns of plots
+    # nrow: Number of rows needed, calculated from # of cols
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                    ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+
+ if (numPlots==1) {
+    print(plots[[1]])
+
+  } else {
+    # Set up the page
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+
+    # Make each plot, in the correct location
+    for (i in 1:numPlots) {
+      # Get the i,j matrix positions of the regions that contain this subplot
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+
+library(ggplot2)
+
+spam1 <- ggplot(spam_data, aes(x=word_freq_our)) + 
+    geom_histogram(binwidth=.1, colour="black", fill="white") +
+    labs(x = "Frequency of 'our'")+
+    theme_minimal()+
+    theme(legend.position = "bottom",
+          axis.text.x = element_text(angle = 45),
+          text = element_text(size = 11))
+
+spam2 <- ggplot(spam_data, aes(x=word_freq_remove)) + 
+    geom_histogram(binwidth=.1, colour="black", fill="white") +
+    labs(x = "Frequency of 'remove'")+
+    theme_minimal()+
+    theme(legend.position = "bottom",
+          axis.text.x = element_text(angle = 45),
+          text = element_text(size = 11))
+
+spam3 <- ggplot(spam_data, aes(x=word_freq_free)) + 
+    geom_histogram(binwidth=.1, colour="black", fill="white") +
+    labs(x = "Frequency of 'free'")+
+    theme_minimal()+
+    theme(legend.position = "bottom",
+          axis.text.x = element_text(angle = 45),
+          text = element_text(size = 11))
+
+spam4 <- ggplot(spam_data, aes(x=word_freq_business)) + 
+    geom_histogram(binwidth=.1, colour="black", fill="white") +
+    labs(x = "Frequency of 'business'")+
+    theme_minimal()+
+    theme(legend.position = "bottom",
+          axis.text.x = element_text(angle = 45),
+          text = element_text(size = 11))
+
+spam5 <- ggplot(spam_data, aes(x=word_freq_your)) + 
+    geom_histogram(binwidth=.1, colour="black", fill="white") +
+    labs(x = "Frequency of 'your'")+
+    theme_minimal()+
+    theme(legend.position = "bottom",
+          axis.text.x = element_text(angle = 45),
+          text = element_text(size = 11))
+
+spam6 <- ggplot(spam_data, aes(x=word_freq_000)) + 
+    geom_histogram(binwidth=.1, colour="black", fill="white") +
+    labs(x = "Frequency of '000'")+
+    theme_minimal()+
+    theme(legend.position = "bottom",
+          axis.text.x = element_text(angle = 45),
+          text = element_text(size = 11))
+
+spam7 <- ggplot(spam_data, aes(x=word_freq_hp)) + 
+    geom_histogram(binwidth=.1, colour="black", fill="white") +
+    labs(x = "Frequency of 'hp'")+
+    theme_minimal()+
+    theme(legend.position = "bottom",
+          axis.text.x = element_text(angle = 45),
+          text = element_text(size = 11))
+
+spam8 <- ggplot(spam_data, aes(x=word_freq_george)) + 
+    geom_histogram(binwidth=.1, colour="black", fill="white") +
+    labs(x = "Frequency of 'george'")+
+    theme_minimal()+
+    theme(legend.position = "bottom",
+          axis.text.x = element_text(angle = 45),
+          text = element_text(size = 11))
+
+spam9 <- ggplot(spam_data, aes(x=word_freq_edu)) + 
+    geom_histogram(binwidth=.1, colour="black", fill="white") +
+    labs(x = "Frequency of 'edu'")+
+    theme_minimal()+
+    theme(legend.position = "bottom",
+          axis.text.x = element_text(angle = 45),
+          text = element_text(size = 11))
+
+spam10 <- ggplot(spam_data, aes(x=char_freq_exla)) + 
+    geom_histogram(binwidth=.1, colour="black", fill="white") +
+    labs(x = "Frequency of '!'")+
+    theme_minimal()+
+    theme(legend.position = "bottom",
+          axis.text.x = element_text(angle = 45),
+          text = element_text(size = 11))
+
+spam11 <- ggplot(spam_data, aes(x=char_freq_dolla)) + 
+    geom_histogram(binwidth=.1, colour="black", fill="white") +
+    labs(x = "Frequency of '$'")+
+    theme_minimal()+
+    theme(legend.position = "bottom",
+          axis.text.x = element_text(angle = 45),
+          text = element_text(size = 11))
+
+spam12 <- ggplot(spam_data, aes(x=capital_run_length_total)) + 
+    geom_histogram(binwidth=.1, colour="black", fill="white") +
+    labs(x = "Capital Length Total")+
+    theme_minimal()+
+    theme(legend.position = "bottom",
+          axis.text.x = element_text(angle = 45),
+          text = element_text(size = 11))
+
+
+multiplot(spam1, spam2, spam3, spam4, cols=2)
+multiplot(spam5, spam6, spam7, spam8, cols=2)
+multiplot(spam9, spam10, spam11, spam12, cols=2)
+```
+
+#### Code for figure 2
+```{r results='asis', echo=TRUE, eval = FALSE, fig.cap = "\\label{}Important Spam Email Variables"}
+box1 <- ggplot(spam_data, aes(x = spam_y_n, y = word_freq_our)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+box2 <- ggplot(spam_data, aes(x = spam_y_n, y = word_freq_remove)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+box3 <- ggplot(spam_data, aes(x = spam_y_n, y = word_freq_free)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+box4 <- ggplot(spam_data, aes(x = spam_y_n, y = word_freq_business)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+box5 <- ggplot(spam_data, aes(x = spam_y_n, y = word_freq_your)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+box6 <- ggplot(spam_data, aes(x = spam_y_n, y = word_freq_000)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+box7 <- ggplot(spam_data, aes(x = spam_y_n, y = word_freq_hp)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+box8 <- ggplot(spam_data, aes(x = spam_y_n, y = word_freq_george)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+box9 <- ggplot(spam_data, aes(x = spam_y_n, y = word_freq_edu)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+box10 <- ggplot(spam_data, aes(x = spam_y_n, y = char_freq_exla)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+box11 <- ggplot(spam_data, aes(x = spam_y_n, y = char_freq_dolla)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+box12 <- ggplot(spam_data, aes(x = spam_y_n, y = capital_run_length_total)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+multiplot(box1, box2, box3, box4, cols=2)
+multiplot(box5, box6, box7, box8, cols=2)
+multiplot(box9, box10, box11, box12, cols=2)
+```
+
+#### Code for figure 3
+```{r results='asis', echo=TRUE, eval = FALSE, fig.cap = "\\label{}Spam Email RPART Decision Tree"}
+library(rpart)
+library(rpart.plot)
+set.seed(25)
+spam.tree <- rpart(spam_y_n ~ ., spam_data) 
+rpart.plot(spam.tree, digits = 3)
+```
+
+#### Code for figure 4
+```{r results='asis', echo=TRUE, eval = FALSE, fig.cap = "\\label{}Backward Regression Selection"}
+library(leaps)
+set.seed(25)
+logfit.bwd.spam = regsubsets(spam_y_n ~ ., train.spam, nvmax=57, method = "backward")  
+bkd.spam.lmsum <- summary(logfit.bwd.spam)
+par(mfrow=c(1,3))
+plot(bkd.spam.lmsum$adjr2 ,xlab = "Number of Variables", ylab = "Adjusted RSq")
+plot(bkd.spam.lmsum$bic ,xlab = "Number of Variables", ylab = "BIC")
+plot(bkd.spam.lmsum$cp ,xlab = "Number of Variables", ylab = "CP")
+bkd_lmspam <- as.data.frame(coef(logfit.bwd.spam , 30))
+```
+
+#### Code for figure 5
+```{r results='asis', echo=TRUE, eval = FALSE, fig.cap = "\\label{}Forward Regression Selection"}
+set.seed(25)
+logfit.fwd.spam = regsubsets(spam_y_n ~ ., train.spam, nvmax=57, method = "forward")  
+fwd.spam.lmsum <- summary(logfit.fwd.spam)
+par(mfrow=c(1,3))
+plot(fwd.spam.lmsum$adjr2 ,xlab = "Number of Variables", ylab = "Adjusted RSq")
+plot(fwd.spam.lmsum$bic ,xlab = "Number of Variables", ylab = "BIC")
+plot(fwd.spam.lmsum$cp ,xlab = "Number of Variables", ylab = "CP")
+fwd_lmspam <- as.data.frame(coef(logfit.fwd.spam , 30))
+```
+
+#### Code for figure 6
+```{r results='asis', echo=TRUE, eval = FALSE, fig.cap = "\\label{}Stepwise Regression Selection"}
+set.seed(25)
+logfit.step.spam = regsubsets(spam_y_n ~ ., train.spam, nvmax=57, method = "seqrep")  
+step.spam.lmsum <- summary(logfit.step.spam)
+par(mfrow=c(1,3))
+plot(step.spam.lmsum$adjr2 ,xlab = "Number of Variables", ylab = "Adjusted RSq")
+plot(step.spam.lmsum$bic ,xlab = "Number of Variables", ylab = "BIC")
+plot(step.spam.lmsum$cp ,xlab = "Number of Variables", ylab = "CP")
+steps_lmspam <- as.data.frame(coef(logfit.step.spam  , 30))
+```
+
+#### Code for figure 7
+```{r results='asis', echo=TRUE, eval = FALSE, message=FALSE, warning=FALSE, fig.cap = "\\label{}Spam Email Random Forest Model"}
+plot(rf.model)
+```
