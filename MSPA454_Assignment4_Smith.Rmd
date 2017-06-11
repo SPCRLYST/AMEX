@@ -1,0 +1,722 @@
+---
+title: ' Predictive Modeling in Multiclass Classification '
+author: "Tyler Smith: Assignment 4"
+date: "May 11, 2017"
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+---
+
+```{r, echo=FALSE}
+#pulling wine data set
+library(knitr)
+library(xtable)
+winedata <- read.csv('http://archive.ics.uci.edu/ml/machine-learning-databases/wine/wine.data',header = FALSE)
+colnames(winedata) <- c("Wine_Class","Alcohol","Malic_acid","Ash","Alcalinity_ash","Magnesium","Total_phenols","Flavanoids",
+                        "Nonflavanoid_phenols","Proanthocyanins","Color_intensity","Hue","OD_diluted_wines",
+                        "Proline") 
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data Quality Check
+
+A quick review of the wine data set shows that all of the variables can be considered numeric. The one exception would be wine class, which is a categorical variable that differentiates different types of wine.
+
+```{r results='asis', echo=FALSE}
+  vartdf <- as.data.frame(sapply(winedata, class))
+  colnames(vartdf) <- c("Data Type")
+  winedata$Wine_Class <- as.factor(winedata$Wine_Class)
+  vartdf$Description <- c("wine classification","alcohol content of wine","quantity of malic","quantity of ash",
+                          "how alcaline ash content is","quantity of magnesium","amount of phenols in wine","quantity of flavanoids",
+                          "quantity of nonflavanoid phenols","quantity of proanthocyanins","measure of color intensity",
+                          "hue of the wine","OD's in wine","quantity of proline in wine")
+  vartdf_xtab <- xtable(vartdf, caption = "Wine Data Types", align=c("@{}l","r", "l@{}"), digits=2)
+  print(vartdf_xtab, scalebox = 0.80, comment = FALSE, justify = left)
+```
+
+The overall summary statistics of the wine data set do not seem to indicate any extreme values. However, the figures for proline seem very large compared to the other variables in the data set. It may be useful to scale or standardize this variable for modeling purpose in order to make it more similar, in terms of size, to the other variables in the data set. 
+
+```{r results='asis', echo=FALSE}
+  summ_xtab1 <- xtable(summary(winedata)[,1:8])
+  print(summ_xtab1, scalebox = 0.80, comment = FALSE)
+  summ_xtab2 <- xtable(summary(winedata)[,9:14], caption = "Wine Data Statistics")
+  print(summ_xtab2, scalebox = 0.80, comment = FALSE)
+```
+\pagebreak
+The wine data set does not indicate any missing variables, so no missing variables will need to be imputed.
+
+```{r results='asis', echo=FALSE}
+  nadf <- as.data.frame(sapply(winedata, function(x) sum(is.na(x))))
+  colnames(nadf) <- c("Missing Variables")
+  na_xtab <- xtable(nadf, align=c("@{}l","l"), digits=2, caption = "Wine Data Missing Variables")
+  print(na_xtab, scalebox = 0.80, comment = FALSE)
+```
+
+The distributions of variables in the wine data set show that all variables are more or less normally distributed. Malic acid seems to have more values centered at the mean. Other variables seem prone to some skew, such as color intensity and proline. It might be useful to transform some of these variables, or remove some potential outliers causing this skew. 
+
+\pagebreak
+
+```{r results='asis', echo=FALSE, fig.cap = "\\label{}Wine Variable Distributions"}
+library(ggplot2)
+  winep1 <- ggplot(winedata, aes(x=winedata$Wine_Class)) + 
+  geom_bar()+
+  labs(x = "Wine Class")+
+  theme_minimal()+
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45),
+        text = element_text(size = 11))
+
+winep2 <- ggplot(winedata, aes(x=winedata$Alcohol)) + 
+                     geom_histogram(aes(y=..density..),   
+                     binwidth=.1,
+                     colour="black", fill="white") +
+  labs(x = "Alcohol")+
+  theme_minimal()+
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45),
+        text = element_text(size = 11))
+
+winep3 <- ggplot(winedata, aes(x=winedata$Malic_acid)) + 
+                     geom_histogram(aes(y=..density..),   
+                     binwidth=.1,
+                     colour="black", fill="white") +
+  labs(x = "Malic acid")+
+  theme_minimal()+
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45),
+        text = element_text(size = 11))
+
+winep4 <- ggplot(winedata, aes(x=winedata$Ash)) + 
+                     geom_histogram(aes(y=..density..),   
+                     binwidth=.1,
+                     colour="black", fill="white") +
+  labs(x = "Ash")+
+  theme_minimal()+
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45),
+        text = element_text(size = 11))
+
+winep5 <- ggplot(winedata, aes(x=winedata$Alcalinity_ash)) + 
+                     geom_histogram(aes(y=..density..),   
+                     binwidth=.1,
+                     colour="black", fill="white") +
+  labs(x = "Alcalinity of ash")+
+  theme_minimal()+
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45),
+        text = element_text(size = 11))
+
+winep6 <- ggplot(winedata, aes(x=winedata$Magnesium)) + 
+                     geom_histogram(aes(y=..density..),   
+                     binwidth=.1,
+                     colour="black", fill="white") +
+  labs(x = "Magnesium")+
+  theme_minimal()+
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45),
+        text = element_text(size = 11))
+
+winep7 <- ggplot(winedata, aes(x=winedata$Total_phenols)) + 
+                     geom_histogram(aes(y=..density..),   
+                     binwidth=.1,
+                     colour="black", fill="white") +
+  labs(x = "Total phenols")+
+  theme_minimal()+
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45),
+        text = element_text(size = 11))
+
+winep8 <- ggplot(winedata, aes(x=winedata$Flavanoids)) + 
+                     geom_histogram(aes(y=..density..),   
+                     binwidth=.1,
+                     colour="black", fill="white") +
+  labs(x = "Flavanoids")+
+  theme_minimal()+
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45),
+        text = element_text(size = 11))
+
+winep9 <- ggplot(winedata, aes(x=winedata$Nonflavanoid_phenols)) + 
+                     geom_histogram(aes(y=..density..),   
+                     binwidth=.1,
+                     colour="black", fill="white") +
+  labs(x = "Nonflavanoid")+
+  theme_minimal()+
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45),
+        text = element_text(size = 11))
+
+winep10 <- ggplot(winedata, aes(x=winedata$Proanthocyanins)) + 
+                     geom_histogram(aes(y=..density..),   
+                     binwidth=.1,
+                     colour="black", fill="white") +
+  labs(x = "Proanthocyanins")+
+  theme_minimal()+
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45),
+        text = element_text(size = 11))
+
+winep11 <- ggplot(winedata, aes(x=winedata$Color_intensity)) + 
+                     geom_histogram(aes(y=..density..),   
+                     binwidth=.1,
+                     colour="black", fill="white") +
+  labs(x = "Color intensity")+
+  theme_minimal()+
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45),
+        text = element_text(size = 11))
+
+winep12 <- ggplot(winedata, aes(x=winedata$Hue)) + 
+                     geom_histogram(aes(y=..density..),   
+                     binwidth=.1,
+                     colour="black", fill="white") +
+  labs(x = "Hue")+
+  theme_minimal()+
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45),
+        text = element_text(size = 11))
+
+winep13 <- ggplot(winedata, aes(x=winedata$OD_diluted_wines)) + 
+                     geom_histogram(aes(y=..density..),   
+                     binwidth=.1,
+                     colour="black", fill="white") +
+  labs(x = "OD's")+
+  theme_minimal()+
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45),
+        text = element_text(size = 11))
+
+winep14 <- ggplot(winedata, aes(x=winedata$Proline)) + 
+                     geom_histogram(aes(y=..density..),   
+                     binwidth=.1,
+                     colour="black", fill="white") +
+  labs(x = "Proline")+
+  theme_minimal()+
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45),
+        text = element_text(size = 11))
+
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+  library(grid)
+
+  # Make a list from the ... arguments and plotlist
+  plots <- c(list(...), plotlist)
+
+  numPlots = length(plots)
+
+  # If layout is NULL, then use 'cols' to determine layout
+  if (is.null(layout)) {
+    # Make the panel
+    # ncol: Number of columns of plots
+    # nrow: Number of rows needed, calculated from # of cols
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                    ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+
+ if (numPlots==1) {
+    print(plots[[1]])
+
+  } else {
+    # Set up the page
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+
+    # Make each plot, in the correct location
+    for (i in 1:numPlots) {
+      # Get the i,j matrix positions of the regions that contain this subplot
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+multiplot(winep1, winep2, winep3, winep4, winep5, winep6, winep7, winep8,
+          winep9, winep10, winep11, winep12, winep13, winep14, cols=5)
+```
+
+While there is some skew, it does not seem extreme and this may not prove detrimental to the modeling process. Knowing the variable distributions will also help with further exploratory data analysis by focusing on some of the anomalies seen here. It also appears that most of the wines in the data set are considered class two wines. 
+
+\pagebreak
+
+## Exploratory Data Analysis
+
+Delving further into the wine data it is possible to see how the continuous variables impact what class of wine is likely. The method used to explore this is through box plots. It is interesting that few of the variables have extreme outliers. 
+
+```{r results='asis', echo=FALSE, fig.cap = "\\label{}Wine Class and Other Variables"}
+wine1 <- ggplot(winedata, aes(x = Wine_Class, y = Alcohol)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+wine2 <- ggplot(winedata, aes(x = Wine_Class, y = Malic_acid)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+wine3 <- ggplot(winedata, aes(x = Wine_Class, y = Ash)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+wine4 <- ggplot(winedata, aes(x = Wine_Class, y = Alcalinity_ash)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+wine5 <- ggplot(winedata, aes(x = Wine_Class, y = Magnesium)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+wine6 <- ggplot(winedata, aes(x = Wine_Class, y = Total_phenols)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+wine7 <- ggplot(winedata, aes(x = Wine_Class, y = Flavanoids)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+wine8 <- ggplot(winedata, aes(x = Wine_Class, y = Nonflavanoid_phenols)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+wine9 <- ggplot(winedata, aes(x = Wine_Class, y = Proanthocyanins)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+wine10 <- ggplot(winedata, aes(x = Wine_Class, y = Color_intensity)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+wine11 <- ggplot(winedata, aes(x = Wine_Class, y = Hue)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+wine12 <- ggplot(winedata, aes(x = Wine_Class, y = OD_diluted_wines)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+wine13 <- ggplot(winedata, aes(x = Wine_Class, y = Proline)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+multiplot(wine1, wine2, wine3, wine4, wine5, wine6, wine7, 
+          wine8, wine9, wine10, wine11, wine12, wine13, cols=5)
+```
+
+The only variables that have noticeable outliers are Proanthocyanins, Malic Acid, and Magnesium. Oddly enough, these outliers are all linked to wine classified as type two. It might be more of a potential issue if wine classified as two was also not one of the most common wines in the data set.
+
+\pagebreak
+
+## Exploratory Tree
+
+The use of a decision tree can provide additional insight into which variables are likely going to lead to a certain class of wine. 
+ 
+```{r results='asis', echo=FALSE, fig.cap = "\\label{}Wine RPART Decision Tree"}
+library(rpart)
+library(rpart.plot)
+wine.tree <- rpart(Wine_Class ~ ., winedata, method=,control=) 
+rpart.plot(wine.tree, digits = 4)
+```
+
+According to a rpart decision tree, the wine with the high flavanoids are more likely going to be class one wines. The proline variable is also an important splitting point with wine -- with values less than 755 are likely going to be class twos or threes. Hue is also very important in deciding which wines are likely going to be class three wines. 
+
+\pagebreak
+
+## Random Forest
+
+One model used to forecast wine class is a random forest. The following tables show how well a random forest model performs, and which variables are determined to be most important. It is interesting to note that many of the same variables deemed important in the initial exploratory analysis are also seen as important in the random forest, as indicated by higher Gini values.
+
+```{r results='asis', echo=FALSE, message=FALSE, warning=FALSE, fig.cap = "\\label{}Wine Type Random Forest"}
+# random forest classification model
+library(randomForest)
+set.seed(25)
+ratio_sep <- 0.80
+index <- sample(1:nrow(winedata),round(ratio_sep*nrow(winedata)))
+train.wine <- winedata[index,]
+test.wine <- winedata[-index,]
+rf.model = randomForest(Wine_Class ~ ., data =  train.wine)
+post.valid.rf = predict(rf.model, newdata = test.wine[2:14])
+rf_winextab2 <- xtable(rf.model$importance, caption = "Important Random Forest Variables")
+print(rf_winextab2, scalebox = 0.6, comment = FALSE)
+rftesttable <- table(post.valid.rf, test.wine$Wine_Class)
+```
+
+The random forest method indicates that the most important variables are Flavanoids, proline, and Color_intensity. These variables were also identified as important in the EDA and exploratory decision tree. By removing 20% of the data from the total data set, and creating a test data set, is possible to get an idea how well a model classifies results.
+
+```{r results='asis', echo=FALSE, message=FALSE, warning=FALSE, fig.cap = "\\label{}Wine Type Random Forest"}
+rftesttable <- table(post.valid.rf, test.wine$Wine_Class)
+xrf <- xtable(rftesttable, caption = "Random Forest Classification Error Results: Test Data")
+print(xrf, scalebox = 0.6, comment = FALSE, justify = left)
+```
+
+\pagebreak
+
+It appears the classification rate is 100% using the random forest technique. This likely is not the reality. This is likely happening due to a lack of data used for validating the model. That said, it might also be that to be classified as a specific type of wine certain elements must be in that wine. For example, in the EDA it is easy to see that each class of wine has certain flavanoid content. 
+
+```{r results='asis', echo=FALSE, message=FALSE, warning=FALSE, fig.cap = "\\label{}Wine Type Random Forest"}
+plot(rf.model)
+```
+
+Looking at the random forest plot also confirms how well the random forest is predicting wine class with about 25 trees.
+
+\pagebreak
+
+## Support Vector Machine
+
+A support vector machine (SVM) model can be used as another type of classification model. The SVM has been tuned in order to maximize performance. This is done by finding which gamma and cost parameter lead to the best classification models. Much like the random forest model, the SVM is correctly classifying each class of wine in the test data set. The following table shows how well a tuned support vector machine performs.
+
+```{r results='asis', echo=FALSE, fig.cap = "\\label{}Wine Type Support Vector Machine"}
+library(e1071)
+set.seed(25)
+tune.out = tune(svm, Wine_Class~., data = train.wine, kernel ="radial", ranges=list(cost=c(0.1,1,10,100,1000), gamma=c(0.5,1,2,3,4)))
+svmfit.opt = svm(Wine_Class~., data = train.wine, kernel = "radial", gamma = 0.5, cost = 10 , decision.values = T)  
+svm.pred = predict(svmfit.opt , test.wine)
+svmtable <- table(svm.pred,test.wine$Wine_Class)
+xsvm <- xtable(svmtable, caption = "SVM Classification Error Results: Test Data")
+print(xsvm, scalebox = 0.6, comment = FALSE, justify = left)
+```
+
+Many of the potential issues with the random forest model may also apply to the SVM model. 
+
+## Neural Network
+
+A neural net model can be used to find linkages between variables and wine classifications. One of the keys to running a successful neural network is having sufficient data. In the case of the wine data set, the lack of data may impact final results. 
+
+```{r results='asis', echo=FALSE, fig.cap = "\\label{}Wine Type Neural Network"}
+library(neuralnet)
+set.seed(25)
+library(nnet)
+winenn <- nnet(Wine_Class ~ ., train.wine, size = 50, type = "class")
+nnpred <- predict(winenn, test.wine[,2:14], type = "class")
+nntesttable <- table(nnpred, test.wine$Wine_Class)
+xnn <- xtable(nntesttable, caption = "Neural Net Classification Error Results: Test Data")
+print(xnn , scalebox = 0.6, comment = FALSE, justify = left)
+```
+
+After multiple attempts at getting a neural network to predict wine class it appears that, there is an issue. The neural network results are very sub par, and the y axis of the table is missing wine class three. This may be due to a lack of data observations. Normally a graph could be used to display the nodes of the neural net, but interpreting them is very complex. In this case a plot added nothing to understanding the neural net model.
+
+\pagebreak
+
+## Conculsion
+
+Based on a quick test of classification error rates with a test data set, both the random forest and SVM models perform very well. The neural network model ended up not performing very well. This could be due to a few factors, such as a lack in data or user error. The results from the random forest and SVM validated much of the analysis in the EDA and the exploratory model tree. 
+
+\pagebreak
+
+## Appendix
+
+#### Code for Figure 1:
+```{r results='asis', eval=FALSE, echo=TRUE, fig.cap = "\\label{}Wine Variable Distributions"}
+library(ggplot2)
+  winep1 <- ggplot(winedata, aes(x=winedata$Wine_Class)) + 
+  geom_bar()+
+  labs(x = "Wine Class")+
+  theme_minimal()+
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45),
+        text = element_text(size = 11))
+
+winep2 <- ggplot(winedata, aes(x=winedata$Alcohol)) + 
+                     geom_histogram(aes(y=..density..),   
+                     binwidth=.1,
+                     colour="black", fill="white") +
+  labs(x = "Alcohol")+
+  theme_minimal()+
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45),
+        text = element_text(size = 11))
+
+winep3 <- ggplot(winedata, aes(x=winedata$Malic_acid)) + 
+                     geom_histogram(aes(y=..density..),   
+                     binwidth=.1,
+                     colour="black", fill="white") +
+  labs(x = "Malic acid")+
+  theme_minimal()+
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45),
+        text = element_text(size = 11))
+
+winep4 <- ggplot(winedata, aes(x=winedata$Ash)) + 
+                     geom_histogram(aes(y=..density..),   
+                     binwidth=.1,
+                     colour="black", fill="white") +
+  labs(x = "Ash")+
+  theme_minimal()+
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45),
+        text = element_text(size = 11))
+
+winep5 <- ggplot(winedata, aes(x=winedata$Alcalinity_ash)) + 
+                     geom_histogram(aes(y=..density..),   
+                     binwidth=.1,
+                     colour="black", fill="white") +
+  labs(x = "Alcalinity of ash")+
+  theme_minimal()+
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45),
+        text = element_text(size = 11))
+
+winep6 <- ggplot(winedata, aes(x=winedata$Magnesium)) + 
+                     geom_histogram(aes(y=..density..),   
+                     binwidth=.1,
+                     colour="black", fill="white") +
+  labs(x = "Magnesium")+
+  theme_minimal()+
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45),
+        text = element_text(size = 11))
+
+winep7 <- ggplot(winedata, aes(x=winedata$Total_phenols)) + 
+                     geom_histogram(aes(y=..density..),   
+                     binwidth=.1,
+                     colour="black", fill="white") +
+  labs(x = "Total phenols")+
+  theme_minimal()+
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45),
+        text = element_text(size = 11))
+
+winep8 <- ggplot(winedata, aes(x=winedata$Flavanoids)) + 
+                     geom_histogram(aes(y=..density..),   
+                     binwidth=.1,
+                     colour="black", fill="white") +
+  labs(x = "Flavanoids")+
+  theme_minimal()+
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45),
+        text = element_text(size = 11))
+
+winep9 <- ggplot(winedata, aes(x=winedata$Nonflavanoid_phenols)) + 
+                     geom_histogram(aes(y=..density..),   
+                     binwidth=.1,
+                     colour="black", fill="white") +
+  labs(x = "Nonflavanoid")+
+  theme_minimal()+
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45),
+        text = element_text(size = 11))
+
+winep10 <- ggplot(winedata, aes(x=winedata$Proanthocyanins)) + 
+                     geom_histogram(aes(y=..density..),   
+                     binwidth=.1,
+                     colour="black", fill="white") +
+  labs(x = "Proanthocyanins")+
+  theme_minimal()+
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45),
+        text = element_text(size = 11))
+
+winep11 <- ggplot(winedata, aes(x=winedata$Color_intensity)) + 
+                     geom_histogram(aes(y=..density..),   
+                     binwidth=.1,
+                     colour="black", fill="white") +
+  labs(x = "Color intensity")+
+  theme_minimal()+
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45),
+        text = element_text(size = 11))
+
+winep12 <- ggplot(winedata, aes(x=winedata$Hue)) + 
+                     geom_histogram(aes(y=..density..),   
+                     binwidth=.1,
+                     colour="black", fill="white") +
+  labs(x = "Hue")+
+  theme_minimal()+
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45),
+        text = element_text(size = 11))
+
+winep13 <- ggplot(winedata, aes(x=winedata$OD_diluted_wines)) + 
+                     geom_histogram(aes(y=..density..),   
+                     binwidth=.1,
+                     colour="black", fill="white") +
+  labs(x = "OD's")+
+  theme_minimal()+
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45),
+        text = element_text(size = 11))
+
+winep14 <- ggplot(winedata, aes(x=winedata$Proline)) + 
+                     geom_histogram(aes(y=..density..),   
+                     binwidth=.1,
+                     colour="black", fill="white") +
+  labs(x = "Proline")+
+  theme_minimal()+
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45),
+        text = element_text(size = 11))
+
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+  library(grid)
+
+  # Make a list from the ... arguments and plotlist
+  plots <- c(list(...), plotlist)
+
+  numPlots = length(plots)
+
+  # If layout is NULL, then use 'cols' to determine layout
+  if (is.null(layout)) {
+    # Make the panel
+    # ncol: Number of columns of plots
+    # nrow: Number of rows needed, calculated from # of cols
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                    ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+
+ if (numPlots==1) {
+    print(plots[[1]])
+
+  } else {
+    # Set up the page
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+
+    # Make each plot, in the correct location
+    for (i in 1:numPlots) {
+      # Get the i,j matrix positions of the regions that contain this subplot
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+multiplot(winep1, winep2, winep3, winep4, winep5, winep6, winep7, winep8,
+          winep9, winep10, winep11, winep12, winep13, winep14, cols=5)
+```
+
+#### Code for Figure 2:
+```{r, eval=FALSE, echo=TRUE, fig.cap = "\\label{}Wine Class vs Continous Variable Graphs"}
+wine1 <- ggplot(winedata, aes(x = Wine_Class, y = Alcohol)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+wine2 <- ggplot(winedata, aes(x = Wine_Class, y = Malic_acid)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+wine3 <- ggplot(winedata, aes(x = Wine_Class, y = Ash)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+wine4 <- ggplot(winedata, aes(x = Wine_Class, y = Alcalinity_ash)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+wine5 <- ggplot(winedata, aes(x = Wine_Class, y = Magnesium)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+wine6 <- ggplot(winedata, aes(x = Wine_Class, y = Total_phenols)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+wine7 <- ggplot(winedata, aes(x = Wine_Class, y = Flavanoids)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+wine8 <- ggplot(winedata, aes(x = Wine_Class, y = Nonflavanoid_phenols)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+wine9 <- ggplot(winedata, aes(x = Wine_Class, y = Proanthocyanins)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+wine10 <- ggplot(winedata, aes(x = Wine_Class, y = Color_intensity)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+wine11 <- ggplot(winedata, aes(x = Wine_Class, y = Hue)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+wine12 <- ggplot(winedata, aes(x = Wine_Class, y = OD_diluted_wines)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+wine13 <- ggplot(winedata, aes(x = Wine_Class, y = Proline)) + 
+  geom_boxplot(fill = "white") +
+  scale_colour_brewer(palette = "Set1")+
+  theme_minimal()+
+  theme(legend.position="bottom")
+
+multiplot(wine1, wine2, wine3, wine4, wine5, wine6, wine7, 
+          wine8, wine9, wine10, wine11, wine12, wine13, cols=5)
+```
+
+#### Code for Figure 3:
+```{r results='asis', eval=FALSE, echo=TRUE, fig.cap = "\\label{}Wine Exploratory Tree"}
+library(rpart)
+library(rpart.plot)
+wine.tree <- rpart(Wine_Class ~ ., winedata, method=,control=) 
+rpart.plot(wine.tree, digits = 4)
+```
+
+#### Code for Figure 4:
+```{r results='asis', eval=FALSE, echo=TRUE, fig.cap = "\\label{}Wine Random Forest Plot"}
+# random forest classification model
+library(randomForest)
+set.seed(25)
+ratio_sep <- 0.80
+index <- sample(1:nrow(winedata),round(ratio_sep*nrow(winedata)))
+train.wine <- winedata[index,]
+test.wine <- winedata[-index,]
+rf.model = randomForest(Wine_Class ~ ., data =  train.wine)
+post.valid.rf = predict(rf.model, newdata = test.wine[2:14])
+rf_winextab2 <- xtable(rf.model$importance, caption = "Important Random Forest Variables")
+print(rf_winextab2, scalebox = 0.6, comment = FALSE)
+rftesttable <- table(post.valid.rf, test.wine$Wine_Class)
+plot(rf.model)
+```
